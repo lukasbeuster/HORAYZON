@@ -60,8 +60,6 @@ def undulation(lon_ip, lat_ip, geoid="EGM96"):
 
     # Compute geoid undulation
     path_aux_data = get_path_aux_data()
-    ## Added print to debug
-    print(f' Path to aux data: {path_aux_data}')
     data_ip = np.empty((len(lat_ip), len(lon_ip)), dtype=np.float64)
     # -------------------------------------------------------------------------
     if geoid == "EGM96":

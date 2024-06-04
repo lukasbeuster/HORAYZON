@@ -23,6 +23,8 @@ import time
 import datetime as dt
 import horayzon as hray
 
+import load_dsm
+
 mpl.style.use("classic")
 
 # Change latex fonts
@@ -35,19 +37,36 @@ mpl.rcParams["mathtext.rm"] = "Bitstream Vera Sans"
 # Settings
 # -----------------------------------------------------------------------------
 
-# Domain size and computation settings
-domain = {"lon_min": -38.45, "lon_max": -35.65,
-          "lat_min": -55.10, "lat_max": -53.90}
-# domain boundaries [degree]
-dist_search = 75.0  # search distance for terrain shading [kilometre]
+## TODO: Load DSM; Change CRS to WGS84. Compute domain size and change comp settings.
+
+# Just to understand what we're doing here:
+
+# Step 1: We're establishing a domain with boundaries because we're not using a complete SRTM tile, but instead area focusing on the island. 
+
+# Step 2: We're downloading a complete srtm file and saving it in the corresponding folder, ignoring the domain size for now.
+
+# Step 3: We're then creating a dictionary with the outer domain boundaries in degrees which contains the domain + the search radius (so we take topography outside the domain into account when searching for the horizon line). 
+
+# Step 4: We then open the full SRTM tile and are slicing it with the outer domain coordinates. Returning 3 one-dimensional arrays (lon, lat, elevation).
+
+# So to appropriate this we'll have to: define the outer domain of 
+
+
+
+# # Domain size and computation settings
+# domain = {"lon_min": -38.45, "lon_max": -35.65,
+#           "lat_min": -55.10, "lat_max": -53.90}
+# # domain boundaries [degree]
+# dist_search = 75.0  # search distance for terrain shading [kilometre]
 ellps = "WGS84"  # Earth's surface approximation (sphere, GRS80 or WGS84)
 
-# Paths and file names
-dem_file_url = "https://srtm.csi.cgiar.org/wp-content/uploads/files/" \
-               + "srtm_30x30/TIFF/S60W060.zip"
+# # Paths and file names
+# dem_file_url = "https://srtm.csi.cgiar.org/wp-content/uploads/files/" \
+#                + "srtm_30x30/TIFF/S60W060.zip"
+# path_in = "../../../UMEP/data/raw_data/R_25GN1.tif"
 path_out = "../../results/output/"
-file_shadow = "shadow_SRTM_South_Georgia.nc"
-file_sw_dir_cor = "sw_dir_cor_SRTM_South_Georgia.nc"
+file_shadow = "shadow_DSM_Amsterdam.nc"
+file_sw_dir_cor = "sw_dir_cor_DSM_Amsterdam.nc"
 
 # -----------------------------------------------------------------------------
 # Prepare data and initialise Terrain class
@@ -56,7 +75,7 @@ file_sw_dir_cor = "sw_dir_cor_SRTM_South_Georgia.nc"
 # Check if output directory exists
 if not os.path.isdir(path_out):
     raise FileNotFoundError("Output directory does not exist")
-path_out += "shadow/gridded_SRTM_South_Georgia/"
+path_out += "shadow/DSM_Amsterdam_full_rez/"
 if not os.path.isdir(path_out):
     os.makedirs(path_out)
 
@@ -67,21 +86,29 @@ if not os.path.isdir(path_out):
 #     zip_ref.extractall(path_out + "S60W060")
 # os.remove(path_out + "S60W060.zip")
 
-# Load required DEM data (including outer boundary zone)
-domain_outer = hray.domain.curved_grid(domain, dist_search, ellps)
-file_dem = path_out + "S60W060/cut_s60w060.tif"
-lon, lat, elevation = hray.load_dem.srtm(file_dem, domain_outer,
-                                         engine="pillow")
+# # Load required DEM data (including outer boundary zone)
+# domain_outer = hray.domain.curved_grid(domain, dist_search, ellps)
+
+
+
+### Changes: Changed to load existing dsm to custom load_dsm function. And changed to gdal bc of warp function and nd pull. 
+file_dem = "../../../UMEP/data/raw_data/R_25GN1.tif"
+lon, lat, elevation, nd, domain = load_dsm.dsm(file_dem,
+                                         engine="gdal")
+print(domain)
 # -> GeoTIFF can also be read with GDAL if available (-> faster)
-mask_ocean = (elevation == -32768.0)
-elevation[mask_ocean] = 0.0
+## Changes: instead of mask ocean, mask nd value (pulled during import)
+mask_nd = (elevation == nd)
+elevation[mask_nd] = 0.0
 
 # Compute indices of inner domain
 slice_in = (slice(np.where(lat >= domain["lat_max"])[0][-1],
                   np.where(lat <= domain["lat_min"])[0][0] + 1),
             slice(np.where(lon <= domain["lon_min"])[0][-1],
                   np.where(lon >= domain["lon_max"])[0][0] + 1))
-
+## Troubleshooting
+print(lon)
+print(slice_in)
 offset_0 = slice_in[0].start
 offset_1 = slice_in[1].start
 print("Inner domain size: " + str(elevation[slice_in].shape))
@@ -124,7 +151,7 @@ del vec_north_enu
 # Compute slope (in global ENU coordinates!)
 slice_in_a1 = (slice(slice_in[0].start - 1, slice_in[0].stop + 1),
                slice(slice_in[1].start - 1, slice_in[1].stop + 1))
-
+print(slice_in_a1)
 vec_tilt_enu \
     = np.ascontiguousarray(hray.topo_param.slope_plane_meth(
         x_enu[slice_in_a1], y_enu[slice_in_a1], z_enu[slice_in_a1],
@@ -154,9 +181,11 @@ loc_or = earth + wgs84.latlon(trans_ecef2enu.lat_or, trans_ecef2enu.lon_or)
 # -> position lies on the surface of the ellipsoid by default
 
 # Create time axis
-time_dt_beg = dt.datetime(2022, 6, 21, 10, 30, tzinfo=dt.timezone.utc)
-time_dt_end = dt.datetime(2022, 6, 21, 18, 45, tzinfo=dt.timezone.utc)
-dt_step = dt.timedelta(hours=0.125)
+## Changes: Changed time to AMS sunrise and sunset.
+time_dt_beg = dt.datetime(2022, 6, 21, 3, 30, tzinfo=dt.timezone.utc)
+time_dt_end = dt.datetime(2022, 6, 21, 20, 00, tzinfo=dt.timezone.utc)
+# changed to 2 hours minutes from 0.125 (7.5 minutes)
+dt_step = dt.timedelta(hours=2)
 num_ts = int((time_dt_end - time_dt_beg) / dt_step)
 ta = [time_dt_beg + dt_step * i for i in range(num_ts)]
 
@@ -307,7 +336,8 @@ del sw_dir_cor
 # -----------------------------------------------------------------------------
 
 # Load data
-ind = 10  # select time step
+## CHANGES: changed time step from 10 to 5 because we don't have that many in 2 hour intervals
+ind = 5  # select time step
 ds = xr.open_dataset(path_out + file_sw_dir_cor)
 sw_dir_cor = ds["sw_dir_cor"][ind, :, :].values
 ds.close()
@@ -320,11 +350,12 @@ gs = gridspec.GridSpec(2, 2, left=0.1, bottom=0.1, right=0.9, top=0.9,
                        hspace=0.05, wspace=0.05, width_ratios=[1.0, 0.027])
 ax = plt.subplot(gs[0, 0])
 ax.set_facecolor(plt.get_cmap("terrain")(0.15)[:3] + (0.25,))
+#TODO: adjust levels to reflect urban heights, or let it be done automatically
 levels = np.arange(0.0, 2600.0, 200.0)
 cmap = colors.LinearSegmentedColormap.from_list(
     "terrain", plt.get_cmap("terrain")(np.linspace(0.25, 1.0, 100)))
 norm = mpl.colors.BoundaryNorm(levels, ncolors=cmap.N, extend="max")
-data_plot = np.ma.masked_where(mask_ocean[slice_in], elevation_ortho)
+data_plot = np.ma.masked_where(mask_nd[slice_in], elevation_ortho)
 plt.pcolormesh(lon[slice_in[1]], lat[slice_in[0]], data_plot,
                cmap=cmap, norm=norm)
 x_ticks = np.arange(-38.0, -35.5, 0.5)
